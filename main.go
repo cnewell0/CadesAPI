@@ -68,27 +68,17 @@ func createNewEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	//json.UnmarshalFieldError
-	dec := json.NewDecoder(strings.NewReader(r.Form)
-
 	if err = json.Unmarshal(reqBody, &newEvent); err != nil {
 		log.Printf("Body parse error, %v", err)
 		w.WriteHeader(400) //400 Bad Request
 		return
 	}
 
-	// ok, err := checkVal(newEvent.DeviceId, newEvent.Latitude, newEvent.Longitude, newEvent.IpAddress)
-	// if err != nil {
-	// 	log.Printf("Naming error, %v", err)
-	// 	w.WriteHeader(500) //500 Internal Server Error
-	// 	return
-	// }
-
-	// if !ok {
-	// 	log.Printf("Another error, %v", err)
-	// 	w.WriteHeader(401) //401 Wrong information
-	// 	return
-	// }
+	if newEvent.DeviceId == "" || newEvent.Latitude == "" || newEvent.Longitude == "" || newEvent.IpAddress == "" {
+		log.Printf("incorrect keys passed")
+		w.WriteHeader(400) //400 Bad Request
+		return
+	}
 
 	allEvents = append(allEvents, newEvent)
 	w.WriteHeader(http.StatusCreated)
