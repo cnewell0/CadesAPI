@@ -69,7 +69,7 @@ func createNewEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	//json.UnmarshalFieldError
-	dec := json.NewDecoder(strings.NewReader(r.Form)
+	//dec := json.NewDecoder(strings.NewReader(r.Form)
 
 	if err = json.Unmarshal(reqBody, &newEvent); err != nil {
 		log.Printf("Body parse error, %v", err)
