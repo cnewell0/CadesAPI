@@ -1,143 +1,174 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/gorilla/mux"
+	"github.com/pkg/errors"
 )
 
+//DBAccess Interface to keep track of CRUD methods
+type DBAccess interface {
+	InsertGeoRecord(anEvent event)
+	GetGeoRecord(deviceID string) SomeEvent
+}
+
+// MockSQLAccessor is a struct for a fake db to test on
+type MockSQLAccessor struct {
+	hostname string
+	myEvents []event
+}
+
+// SQLAcessor is a struct for connecting to the actual db
+type SQLAcessor struct {
+	dbRead  *sql.DB
+	anEvent []event
+}
+
 type event struct {
-	DeviceId  string `json:"device_id"`
+	DeviceID  string `json:"device_id"`
 	Latitude  string `json:"latitude"`
 	Longitude string `json:"longitude"`
-	IpAddress string `json:"ip_address"`
+	IPAddress string `json:"ip_address"`
 }
 
-type info struct {
-	DeviceId          string `json:"device_id"`
-	UserAgent         string `json:"user_agent"`
-	BatteryLevel      string `json:"battery_level"`
-	IpAddress         string `json:"ip_address"`
-	ScreenOrientation string `json: "screen_orientation`
-}
+// SomeEvent is, you know, some event
+type SomeEvent []event
 
-type events []event
-
-var allEvents = events{
+var geoRecord = SomeEvent{
 	{
-		DeviceId:  "1234-123919291-123-12312",
-		Latitude:  "48.121",
-		Longitude: "127.12",
-		IpAddress: "129.232.23.121",
+		DeviceID:  "1234",
+		Latitude:  "50.111",
+		Longitude: "100.222",
+		IPAddress: "129.232.23.121",
 	},
 }
 
-type allInfo []info
-
-var infos = allInfo{}
-
-func handleRequests() {
-	myRouter := mux.NewRouter().StrictSlash(true)
-	//myRouter.HandleFunc("/", homeLink)
-
-	myRouter.HandleFunc("/geo", createNewEvent).Methods("POST")
-	myRouter.HandleFunc("/geo", retrunAllEvents).Methods("GET")
-	myRouter.HandleFunc("/geo/{deviceId}", returnSingleEvent).Methods("GET")
-	myRouter.HandleFunc("/geo/{deviceId}", deleteArticle).Methods("DELETE")
-	myRouter.HandleFunc("/geo/{deviceId}", updateEvent).Methods("PATCH")
-
-	log.Fatal(http.ListenAndServe(":1010", myRouter))
+// NewMockSQLAccessor is the contstuctor for this fake db
+func NewMockSQLAccessor(hostname string, myEvents []event) *MockSQLAccessor {
+	mockSQL := MockSQLAccessor{
+		hostname: hostname,
+		myEvents: myEvents,
+	}
+	return &mockSQL
 }
 
-func createNewEvent(w http.ResponseWriter, r *http.Request) {
-	var newEvent event
-
-	if r.Method != http.MethodPost {
-		w.WriteHeader(405) //405 Mehod Not Allowed
-		return
+// NewSQLAccessor is the constructor for mysql
+func NewSQLAccessor(dbRead *sql.DB, anEvent []event) *SQLAcessor {
+	dbGlobal := SQLAcessor{
+		dbRead:  dbRead,
+		anEvent: anEvent,
 	}
+	return &dbGlobal
+}
 
-	reqBody, err := ioutil.ReadAll(r.Body)
+func configure(hostname string, port string, username string, password string) (DBAccess, error) {
+	var dba DBAccess
+	if hostname == "fake" {
+		dba = NewMockSQLAccessor(hostname, geoRecord)
+	} else {
+		configRead := mysql.Config{
+			User:   username,
+			Passwd: password,
+			Net:    "tcp",
+			Addr:   fmt.Sprintf("%s:%d", hostname, port),
+		}
+		dbRead, err := sql.Open("mysql", configRead.FormatDSN())
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to open db global read client")
+		}
+		if err := dbRead.Ping(); err != nil {
+			return nil, errors.Wrap(err, "failed to ping db global read server")
+		}
+		dba = NewSQLAccessor(dbRead, geoRecord)
+	}
+	return dba, nil
+}
+
+// InsertGeoRecord inserts a record from JSON into a fake db
+func (mdb MockSQLAccessor) InsertGeoRecord(anEvent event) {
+
+	//fmt.Printf("%+v\n", anEvent)
+
+	geoRecord = append(geoRecord, anEvent)
+
+	fmt.Printf("%+v\n", geoRecord)
+}
+
+// InsertGeoRecord inserts a record from JSON into real mysql
+func (rsql SQLAcessor) InsertGeoRecord(anEvent event) {
+	stmt, err := rsql.dbRead.Prepare("INSERT INTO posts(deviceID) VALUES(?, ?, ?, ?)")
 	if err != nil {
-		log.Printf("Body read error, %v", err)
-		w.WriteHeader(500) //500 Internal Server Error
-		return
+		panic(err.Error())
 	}
+	deviceID := "device_id"
 
-	if err = json.Unmarshal(reqBody, &newEvent); err != nil {
-		log.Printf("Body parse error, %v", err)
-		w.WriteHeader(400) //400 Bad Request
-		return
+	_, err = stmt.Exec(deviceID)
+	if err != nil {
+		panic(err.Error())
 	}
-
-	if newEvent.DeviceId == "" || newEvent.Latitude == "" || newEvent.Longitude == "" || newEvent.IpAddress == "" {
-		log.Printf("incorrect keys passed")
-		w.WriteHeader(400) //400 Bad Request
-		return
-	}
-
-	allEvents = append(allEvents, newEvent)
-	w.WriteHeader(http.StatusCreated)
-
-	fmt.Printf("%+v\n", allEvents)
-	json.NewEncoder(w).Encode(newEvent)
-
+	fmt.Print("New post was created")
 }
 
-// func homeLink(w http.ResponseWriter, r *http.Request) {
-// 	fmt.Fprintf(w, "Welcome home!")
-// 	fmt.Println("Endpoint Hit: beep boop")
-// }
+// GetGeoRecord gets the record and returns it to the console
+func (rsql SQLAcessor) GetGeoRecord(deviceID string) SomeEvent {
 
-func retrunAllEvents(w http.ResponseWriter, r *http.Request) {
+	result, err := rsql.dbRead.Query("SELECT device_id from posts WHERE device_id = ?")
+	if err != nil {
+		panic(err.Error())
+	}
+
+	var myEvents event
+
+	defer result.Close()
+	for result.Next() {
+		err := result.Scan(&myEvents.DeviceID, &myEvents.Latitude, &myEvents.Longitude, &myEvents.IPAddress)
+		if err != nil {
+			panic(err.Error())
+		}
+	}
+
+	geoRecord = append(geoRecord, myEvents)
+	return geoRecord
+}
+
+// GetGeoRecord grabs and returns the all the events stored, from a mock db
+func (mdb MockSQLAccessor) GetGeoRecord(deviceID string) SomeEvent {
 	fmt.Println("Got 'em: Returning all events")
-	json.NewEncoder(w).Encode(allEvents)
-}
+	//geoRecord = append(geoRecord, mdb.myEvents)
 
-func returnSingleEvent(w http.ResponseWriter, r *http.Request) {
-	eventID := mux.Vars(r)["deviceId"]
-
-	for _, singleEvent := range allEvents {
-		if singleEvent.DeviceId == eventID {
-			json.NewEncoder(w).Encode(singleEvent)
-		}
-	}
-}
-
-func deleteArticle(w http.ResponseWriter, r *http.Request) {
-	eventID := mux.Vars(r)["deviceId"]
-
-	for i, singleEvent := range allEvents {
-		if singleEvent.DeviceId == eventID {
-			allEvents = append(allEvents[:i], allEvents[i+1:]...)
-			fmt.Fprintf(w, "The event with ID %v has been deleted successfully", eventID)
-		}
-	}
-}
-
-func updateEvent(w http.ResponseWriter, r *http.Request) {
-	var updatedEvent event
-
-	reqBody, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		fmt.Fprintf(w, "Enter in proper JSON formatting")
-	}
-	json.Unmarshal(reqBody, &updatedEvent)
-
-	for i, singleEvent := range allEvents {
-		if singleEvent.DeviceId == mux.Vars(r)["deviceId"] {
-			singleEvent.Latitude = updatedEvent.Latitude
-			singleEvent.Longitude = updatedEvent.Longitude
-			allEvents = append(allEvents[:i], singleEvent)
-			json.NewEncoder(w).Encode(singleEvent)
-		}
-	}
+	return geoRecord
 }
 
 func main() {
-	handleRequests()
+	ExtraGeoRecord := []event{}
+	GeoRecord := event{}
+
+	router := mux.NewRouter().StrictSlash(true)
+	dba, _ := configure("fake", "okay", "random", "fillers")
+
+	router.Handle("/geo/{id}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ExtraGeoRecord = dba.GetGeoRecord("{id}")
+		ExtraGeoRecord = append(ExtraGeoRecord, GeoRecord)
+		json.NewEncoder(w).Encode(ExtraGeoRecord)
+	})).Methods(http.MethodGet)
+
+	router.Handle("/geo", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqBody, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			log.Printf("Body read error, %v", err)
+			w.WriteHeader(500) //500 Internal Server Error
+			return
+		}
+		json.Unmarshal(reqBody, &GeoRecord)
+		dba.InsertGeoRecord(GeoRecord)
+	})).Methods(http.MethodPost)
+
+	log.Fatal(http.ListenAndServe(":1010", router))
 }
