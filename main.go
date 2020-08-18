@@ -19,18 +19,6 @@ type DBAccess interface {
 	GetGeoRecord(deviceID string) SomeEvent
 }
 
-// MockSQLAccessor is a struct for a fake db to test on
-type MockSQLAccessor struct {
-	hostname string
-	myEvents []event
-}
-
-// SQLAcessor is a struct for connecting to the actual db
-type SQLAcessor struct {
-	dbRead  *sql.DB
-	anEvent []event
-}
-
 type event struct {
 	DeviceID  string `json:"device_id"`
 	Latitude  string `json:"latitude"`
@@ -48,24 +36,6 @@ var geoRecord = SomeEvent{
 		Longitude: "100.222",
 		IPAddress: "129.232.23.121",
 	},
-}
-
-// NewMockSQLAccessor is the contstuctor for this fake db
-func NewMockSQLAccessor(hostname string, myEvents []event) *MockSQLAccessor {
-	mockSQL := MockSQLAccessor{
-		hostname: hostname,
-		myEvents: myEvents,
-	}
-	return &mockSQL
-}
-
-// NewSQLAccessor is the constructor for mysql
-func NewSQLAccessor(dbRead *sql.DB, anEvent []event) *SQLAcessor {
-	dbGlobal := SQLAcessor{
-		dbRead:  dbRead,
-		anEvent: anEvent,
-	}
-	return &dbGlobal
 }
 
 func configure(hostname string, port string, username string, password string) (DBAccess, error) {
@@ -91,61 +61,6 @@ func configure(hostname string, port string, username string, password string) (
 	return dba, nil
 }
 
-// InsertGeoRecord inserts a record from JSON into a fake db
-func (mdb MockSQLAccessor) InsertGeoRecord(anEvent event) {
-
-	//fmt.Printf("%+v\n", anEvent)
-
-	geoRecord = append(geoRecord, anEvent)
-
-	fmt.Printf("%+v\n", geoRecord)
-}
-
-// InsertGeoRecord inserts a record from JSON into real mysql
-func (rsql SQLAcessor) InsertGeoRecord(anEvent event) {
-	stmt, err := rsql.dbRead.Prepare("INSERT INTO posts(deviceID) VALUES(?, ?, ?, ?)")
-	if err != nil {
-		panic(err.Error())
-	}
-	deviceID := "device_id"
-
-	_, err = stmt.Exec(deviceID)
-	if err != nil {
-		panic(err.Error())
-	}
-	fmt.Print("New post was created")
-}
-
-// GetGeoRecord gets the record and returns it to the console
-func (rsql SQLAcessor) GetGeoRecord(deviceID string) SomeEvent {
-
-	result, err := rsql.dbRead.Query("SELECT device_id from posts WHERE device_id = ?")
-	if err != nil {
-		panic(err.Error())
-	}
-
-	var myEvents event
-
-	defer result.Close()
-	for result.Next() {
-		err := result.Scan(&myEvents.DeviceID, &myEvents.Latitude, &myEvents.Longitude, &myEvents.IPAddress)
-		if err != nil {
-			panic(err.Error())
-		}
-	}
-
-	geoRecord = append(geoRecord, myEvents)
-	return geoRecord
-}
-
-// GetGeoRecord grabs and returns the all the events stored, from a mock db
-func (mdb MockSQLAccessor) GetGeoRecord(deviceID string) SomeEvent {
-	fmt.Println("Got 'em: Returning all events")
-	//geoRecord = append(geoRecord, mdb.myEvents)
-
-	return geoRecord
-}
-
 func main() {
 	ExtraGeoRecord := []event{}
 	GeoRecord := event{}
@@ -169,6 +84,8 @@ func main() {
 		json.Unmarshal(reqBody, &GeoRecord)
 		dba.InsertGeoRecord(GeoRecord)
 	})).Methods(http.MethodPost)
+
+	infoHandlerw()
 
 	log.Fatal(http.ListenAndServe(":1010", router))
 }
