@@ -49,9 +49,9 @@ func GetInfoRecord(deviceID string) SomeInfo {
 	return infoRecord
 }
 
-func infoHandlerw() {
-	var theInfos info
-	router := mux.NewRouter().StrictSlash(true)
+func infoHandlerw(router *mux.Router) {
+	TheInfos := info{}
+
 	router.Handle("/info", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reqBody, err := ioutil.ReadAll(r.Body)
 		if err != nil {
@@ -59,12 +59,13 @@ func infoHandlerw() {
 			w.WriteHeader(500) //500 Internal Server Error
 			return
 		}
-		json.Unmarshal(reqBody, &infoRecord)
-		InsertInfoRecord(theInfos)
+		json.Unmarshal(reqBody, &TheInfos)
+		InsertInfoRecord(TheInfos)
 	})).Methods(http.MethodPost)
 
 	router.Handle("/info/{id}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		infoRecord = GetInfoRecord("{id}")
 		json.NewEncoder(w).Encode(infoRecord)
 	})).Methods(http.MethodGet)
+
 }

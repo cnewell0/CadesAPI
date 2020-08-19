@@ -1,78 +1,84 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
-	"os"
-	"time"
+	"strings"
 
 	"github.com/dgrijalva/jwt-go"
-	"github.com/gin-gonic/gin"
-	"github.com/go-redis/redis"
+	"github.com/gorilla/context"
+	"github.com/gorilla/mux"
+	"github.com/mitchellh/mapstructure"
 )
 
-//User - struct for user credentials
-type User struct {
-	ID       uint64 `json:"id"`
+type Credentials struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
 
-//A sample use
-var user = User{
-	ID:       1,
-	Username: "username",
-	Password: "password",
+type JwtToken struct {
+	Token string `json:"token"`
 }
-var client *redis.Client
 
-func init() {
-	//Initializing redis
-	dsn := os.Getenv("REDIS_DSN")
-	if len(dsn) == 0 {
-		dsn = "localhost:6379"
-	}
-	client = redis.NewClient(&redis.Options{
-		Addr: dsn, //redis port
+type Exception struct {
+	Message string `json:"message"`
+}
+
+//CreateTokenEndpoint creates a personalized bearer token
+func CreateTokenEndpoint(w http.ResponseWriter, req *http.Request) {
+	var user Credentials
+	_ = json.NewDecoder(req.Body).Decode(&user)
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"username": user.Username,
 	})
-	//_, err := client.Ping().Result()
-	// if err != nil {
-	// 	panic(err)
-	// }
+	tokenString, error := token.SignedString([]byte("secret"))
+	if error != nil {
+		fmt.Println(error)
+	}
+	json.NewEncoder(w).Encode(JwtToken{Token: tokenString})
 }
 
-// Login function is where the user enters credentials and checks it with fake db
-func Login(c *gin.Context) {
-	var u User
-	if err := c.ShouldBindJSON(&u); err != nil {
-		c.JSON(http.StatusUnprocessableEntity, "Invalid json provided")
-		return
-	}
-	//compare the user from the request, with the one we defined:
-	if user.Username != u.Username || user.Password != u.Password {
-		c.JSON(http.StatusUnauthorized, "Please provide valid login details")
-		return
-	}
-	token, err := CreateToken(user.ID)
-	if err != nil {
-		c.JSON(http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-	c.JSON(http.StatusOK, token)
+//ValidateMiddleware verifies that the bearer token is sent
+func ValidateMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		authorizationHeader := req.Header.Get("authorization")
+		if authorizationHeader != "" {
+			bearerToken := strings.Split(authorizationHeader, " ")
+			if len(bearerToken) == 2 {
+				token, error := jwt.Parse(bearerToken[1], func(token *jwt.Token) (interface{}, error) {
+					if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+						return nil, fmt.Errorf("Error")
+					}
+					return []byte("secret"), nil
+				})
+				if error != nil {
+					json.NewEncoder(w).Encode(Exception{Message: error.Error()})
+					return
+				}
+				if token.Valid {
+					context.Set(req, "decoded", token.Claims)
+					next(w, req)
+				} else {
+					json.NewEncoder(w).Encode(Exception{Message: "Invalid authorization token"})
+				}
+			}
+		} else {
+			json.NewEncoder(w).Encode(Exception{Message: "Authorization header is required"})
+		}
+	})
 }
 
-// CreateToken -> creates new access token
-func CreateToken(userid uint64) (string, error) {
-	var err error
-	//Creating Access Token
-	os.Setenv("ACCESS_SECRET", "jdnfksdmfksd")
-	atClaims := jwt.MapClaims{}
-	atClaims["authorized"] = true
-	atClaims["user_id"] = userid
-	atClaims["exp"] = time.Now().Add(time.Minute * 15).Unix()
-	at := jwt.NewWithClaims(jwt.SigningMethodHS256, atClaims)
-	token, err := at.SignedString([]byte(os.Getenv("ACCESS_SECRET")))
-	if err != nil {
-		return "", err
-	}
-	return token, nil
+//TestEndpoint returns the Credentials struct if the correct access token is sent
+func TestEndpoint(w http.ResponseWriter, req *http.Request) {
+	decoded := context.Get(req, "decoded")
+	var user Credentials
+	mapstructure.Decode(decoded.(jwt.MapClaims), &user)
+	json.NewEncoder(w).Encode(user)
+}
+
+func HandleTime(router *mux.Router) {
+	fmt.Println("Starting the application...")
+	router.HandleFunc("/authenticate", CreateTokenEndpoint).Methods("POST")
+	router.HandleFunc("/test", ValidateMiddleware(TestEndpoint)).Methods("GET")
 }

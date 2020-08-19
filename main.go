@@ -85,7 +85,8 @@ func main() {
 		dba.InsertGeoRecord(GeoRecord)
 	})).Methods(http.MethodPost)
 
-	infoHandlerw()
+	infoHandlerw(router)
+	HandleTime(router)
 
 	log.Fatal(http.ListenAndServe(":1010", router))
 }
