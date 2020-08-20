@@ -1,16 +1,13 @@
 package main
 
 import (
-	"database/sql"
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 
-	"github.com/go-sql-driver/mysql"
 	"github.com/gorilla/mux"
-	"github.com/pkg/errors"
 )
 
 //DBAccess Interface to keep track of CRUD methods
@@ -38,27 +35,21 @@ var geoRecord = SomeEvent{
 	},
 }
 
-func configure(hostname string, port string, username string, password string) (DBAccess, error) {
-	var dba DBAccess
-	if hostname == "fake" {
-		dba = NewMockSQLAccessor(hostname, geoRecord)
-	} else {
-		configRead := mysql.Config{
-			User:   username,
-			Passwd: password,
-			Net:    "tcp",
-			Addr:   fmt.Sprintf("%s:%d", hostname, port),
-		}
-		dbRead, err := sql.Open("mysql", configRead.FormatDSN())
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to open db global read client")
-		}
-		if err := dbRead.Ping(); err != nil {
-			return nil, errors.Wrap(err, "failed to ping db global read server")
-		}
-		dba = NewSQLAccessor(dbRead, geoRecord)
+var (
+	WarningLogger *log.Logger
+	InfoLogger    *log.Logger
+	ErrorLogger   *log.Logger
+)
+
+func initLog() {
+	file, err := os.OpenFile("logs.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
+	if err != nil {
+		log.Fatal(err)
 	}
-	return dba, nil
+
+	InfoLogger = log.New(file, "INFO: ", log.Ldate|log.Ltime|log.Lshortfile)
+	WarningLogger = log.New(file, "WARNING: ", log.Ldate|log.Ltime|log.Lshortfile)
+	ErrorLogger = log.New(file, "ERROR: ", log.Ldate|log.Ltime|log.Lshortfile)
 }
 
 func main() {
@@ -66,7 +57,7 @@ func main() {
 	GeoRecord := event{}
 
 	router := mux.NewRouter().StrictSlash(true)
-	dba, _ := configure("fake", "okay", "random", "fillers")
+	dba, _ := Configure("fake", "okay", "random", "fillers")
 
 	router.Handle("/geo/{id}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ExtraGeoRecord = dba.GetGeoRecord("{id}")
@@ -87,6 +78,14 @@ func main() {
 
 	infoHandlerw(router)
 	HandleTime(router)
+
+	var w http.ResponseWriter
+	pullMsgsConcurrenyControl(w, "kochava-testing", "test-sub")
+
+	// InfoLogger.Println("Starting the application...")
+	// InfoLogger.Println("Something noteworthy happened")
+	// WarningLogger.Println("There is something you should know about")
+	// ErrorLogger.Println("Something went wrong")
 
 	log.Fatal(http.ListenAndServe(":1010", router))
 }
